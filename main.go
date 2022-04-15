@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"unsafe"
 )
 
 type Data struct {
-	A int
-	S string
+	Type    int
+	User    string
+	Message string
+	Raw     json.RawMessage
 }
 
 type Client struct {
@@ -18,10 +19,11 @@ type Client struct {
 }
 
 // Список подключенных клиентов
-var clientList []*Client
+//var clientList []*Client
+var clientList map[string]*Client
 
 func main() {
-	clientList = make([]*Client, 0)
+	clientList = make(map[string]*Client)
 
 	// 1. Создать слушатель TCP
 	addr, e := net.ResolveTCPAddr("tcp", "127.0.0.1:8888")
@@ -37,6 +39,8 @@ func main() {
 		return
 	}
 
+	var n int
+	nickName := make([]byte, 40)
 	for {
 		fmt.Println("Ожидание подключений...")
 		// 3. Ожидание подключения клиента
@@ -46,65 +50,91 @@ func main() {
 			return
 		}
 
-		fmt.Println("Подключен новый клиени", clientSocket.RemoteAddr().String())
+		go func() {
+			for {
+				n, e = clientSocket.Read(nickName)
+				if e != nil {
+					fmt.Println("ERROR READ CLIENT NICKNAME")
+					return
+				}
 
-		client := &Client{
-			Socket:      clientSocket,
-			IsConnected: true,
-		}
+				nickNameString := string(nickName[0:n])
 
-		// 4. Отправить работу с подключенным
-		//	  клиентов в отдельный поток
-		go ClientWorker(client)
+				_, ok := clientList[nickNameString]
+				if ok {
+					_, _ = clientSocket.Write([]byte("1"))
+					continue
+				} else {
+					_, _ = clientSocket.Write([]byte("0"))
+				}
 
-		// 5. Добавить в общий список подключенных
-		//    клиентов подключенного клиента
-		clientList = append(clientList, client)
+				fmt.Println("Подключен новый клиент", nickNameString, clientSocket.RemoteAddr().String())
+
+				client := &Client{
+					Socket:      clientSocket,
+					IsConnected: true,
+				}
+
+				// 4. Отправить работу с подключенным
+				//	  клиентов в отдельный поток
+				go ClientWorker(client)
+
+				// 5. Добавить в общий список подключенных
+				//    клиентов подключенного клиента
+				clientList[nickNameString] = client
+
+				i := 0
+				clientNames := make([]string, len(clientList))
+				for nick := range clientList {
+					clientNames[i] = nick
+					i++
+				}
+
+				var data Data
+				data.Type = 3
+				data.Raw, e = json.Marshal(clientNames)
+				if e != nil {
+					fmt.Println(e)
+					return
+				}
+
+				bytes, e := json.Marshal(data)
+				if e != nil {
+					fmt.Println(e)
+					return
+				}
+
+				for _, client := range clientList {
+					_, _ = client.Socket.Write(bytes)
+				}
+
+				return
+			}
+		}()
 	}
 
 }
 
 func ClientWorker(client *Client) {
-
-	dataLen := make([]byte, 8)
-
+	buffer := make([]byte, 8192)
+	var data Data
 	for client.IsConnected {
-
-		n, e := client.Socket.Read(dataLen)
+		n, e := client.Socket.Read(buffer)
 		if e != nil {
 			client.IsConnected = false
 			break
 		}
-
-		buffer := make([]byte, ByteArrayToInt(dataLen))
-
-		n, e = client.Socket.Read(buffer)
-		if e != nil {
-			client.IsConnected = false
-			break
-		}
-
-		fmt.Println(client.Socket.RemoteAddr().String(), "принято", n+8, "байт")
-
-		fmt.Println(string(buffer))
-
-		var data Data
-		e = json.Unmarshal(buffer, &data)
+		e = json.Unmarshal(buffer[:n], &data)
 		if e != nil {
 			fmt.Println(e)
 			return
 		}
 
-		fmt.Println(data)
+		if data.Type == 2 {
+			user, ok := clientList[data.User]
+			if ok {
+				_, _ = user.Socket.Write(buffer[:n])
+			}
+		}
 	}
-
-}
-
-func ByteArrayToInt(arr []byte) int64 {
-	val := int64(0)
-	size := len(arr)
-	for i := 0; i < size; i++ {
-		*(*uint8)(unsafe.Pointer(uintptr(unsafe.Pointer(&val)) + uintptr(i))) = arr[i]
-	}
-	return val
 }
