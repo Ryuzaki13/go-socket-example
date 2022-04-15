@@ -130,11 +130,25 @@ func ClientWorker(client *Client) {
 			return
 		}
 
-		if data.Type == 2 {
-			user, ok := clientList[data.User]
-			if ok {
-				_, _ = user.Socket.Write(buffer[:n])
+		switch data.Type {
+		case 2:
+			{
+				user, ok := clientList[data.User]
+				fmt.Println(user)
+				if ok {
+					_, _ = user.Socket.Write(buffer[:n])
+				}
+			}
+
+		case 4:
+			{
+				for _, user := range clientList {
+					if client.Socket != user.Socket {
+						_, _ = user.Socket.Write(buffer[:n])
+					}
+				}
 			}
 		}
+
 	}
 }

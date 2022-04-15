@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"os"
 )
 
 type Data struct {
@@ -85,7 +88,7 @@ func main() {
 			}
 
 			switch recv.Type {
-			case 2:
+			case 2, 4:
 				fmt.Println(recv.Message)
 			case 3:
 				e = json.Unmarshal(recv.Raw, &clientList)
@@ -100,12 +103,13 @@ func main() {
 	}()
 
 	var command int
+	reader := bufio.NewReader(os.Stdin)
 
 	for {
 
 		fmt.Println("Выберите команду:")
-		fmt.Println("1 - получить последнюю новость")
-		fmt.Println("2 - отправить сообщение")
+		fmt.Println("1 - отправить сообщение")
+		fmt.Println("2 - Отправить всем клиентом")
 		fmt.Println("0 - завершить программу")
 
 		_, _ = fmt.Scanln(&command)
@@ -115,8 +119,6 @@ func main() {
 			fmt.Println("До встречи!")
 			return
 		case 1:
-			//
-		case 2:
 
 			fmt.Println("Список клиентов")
 			for i, client := range clientList {
@@ -131,12 +133,43 @@ func main() {
 				fmt.Println("Неверный номер пользователя")
 				break
 			}
+			fmt.Print("Введите сообщение: ")
+
+			line, _, e := reader.ReadLine()
+
+			if e == io.EOF {
+				break
+			}
 
 			data.Type = 2
+			data.Message = string(line)
 			data.User = clientList[id]
 
+			bytes, e := json.Marshal(data)
+			if e != nil {
+				fmt.Println(e)
+				break
+			}
+
+			_, e = socket.Write(bytes)
+			if e != nil {
+				fmt.Println(e)
+				_ = socket.Close()
+				return
+			}
+		case 2:
+
+			data.Type = 4
+
 			fmt.Print("Введите сообщение: ")
-			_, _ = fmt.Scanln(&data.Message)
+
+			line, _, e := reader.ReadLine()
+
+			if e == io.EOF {
+				break
+			}
+
+			data.Message = string(line)
 
 			bytes, e := json.Marshal(data)
 			if e != nil {
